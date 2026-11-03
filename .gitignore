@@ -1,0 +1,33 @@
+# Secrets
+.env
+.env.*
+key.txt
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.python-version
+
+# Scan output / reports
+*.xml
+*.gnmap
+*.nmap
+reports/
+scans/
+
+# Local notes (publishing guides, drafts)
+_notes/
+*.bak
+*.original
+
+# Editors & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
