@@ -1,4 +1,4 @@
-# AI Network Security Scanner 🛡️
+﻿# AI Network Security Scanner 🛡️
 
 A small Python CLI that scans a host with **Nmap** and turns the raw output into
 a readable security report using **Google Gemini**.
@@ -37,7 +37,7 @@ Point it at `localhost` or a private IP (e.g. `192.168.1.10`), and it will:
 
 ```bash
 # 1. Clone
-git clone https://github.com/<your-username>/ai-network-scanner.git
+git clone https://github.com/7ssann/ai-network-scanner.git
 cd ai-network-scanner
 
 # 2. Install the Python dependencies
