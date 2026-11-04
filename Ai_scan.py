@@ -1,201 +1,13 @@
 
-import nmap
-from google import genai
-from google.genai import errors
-import ipaddress
-import os
-import sys
-import time
-from urllib.parse import urlparse
+"""AI Network Security Scanner - command line interface.
 
-# ==========================================
-# CONFIGURATION
-# ==========================================
-
-# The API key is read from the environment so it is never committed to Git.
-#   PowerShell (current session):  $env:GEMINI_API_KEY = "your-key"
-#   PowerShell (permanent):        setx GEMINI_API_KEY "your-key"
-API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-
-# Primary model first, then fallbacks. If a model is overloaded (503) or
-# rate limited (429), the next one in the list is tried.
-MODEL_CANDIDATES = [
-    "gemini-3.8-flash",
-    "gemini-3.6-flash",
-    "gemini-3.5-flash",
-    "gemini-flash-latest",
-]
-
-RETRY_ROUNDS = 2      # extra full passes over the model list
-RETRY_DELAY = 3       # seconds, multiplied by the retry round
-
-
-# ==========================================
-# TARGET VALIDATION
-# ==========================================
-
-def get_target(value):
-    value = value.strip()
-
-    if "://" in value:
-        value = urlparse(value).hostname or ""
-
-    else:
-        value = value.split("/")[0].split(":")[0]
-
-    if not value:
-        raise ValueError("Invalid target.")
-
-    # Restrict this demo to localhost or private IP addresses.
-    try:
-        ip = ipaddress.ip_address(value)
-
-        if not (ip.is_loopback or ip.is_private):
-            raise ValueError(
-                "For this demo, use localhost or a private IP address."
-            )
-
-        return str(ip)
-
-    except ValueError as error:
-        if "For this demo" in str(error):
-            raise
-
-    # Accept hostnames only for this local demo.
-    if value.lower() in ("localhost",):
-        return value
-
-    raise ValueError(
-        "For this demo, enter localhost or a private IP address, "
-        "such as 127.0.0.1 or 192.168.1.10."
-    )
-
-
-# ==========================================
-# NMAP SCAN
-# ==========================================
-
-def run_nmap_scan(target):
-    scanner = nmap.PortScanner()
-
-    print(f"\n[*] Starting Nmap scan for {target}...")
-    print("[*] Scanning the top 100 TCP ports. Please wait.\n")
-
-    scanner.scan(
-        hosts=target,
-        arguments="-sV -T4 --top-ports 100"
-    )
-
-    results = []
-
-    for host in scanner.all_hosts():
-        results.append(f"Host: {host}")
-        results.append(f"Status: {scanner[host].state()}")
-
-        for protocol in scanner[host].all_protocols():
-            for port in sorted(scanner[host][protocol].keys()):
-                service = scanner[host][protocol][port]
-
-                results.append(
-                    f"Protocol: {protocol.upper()} | "
-                    f"Port: {port} | "
-                    f"State: {service.get('state', 'unknown')} | "
-                    f"Service: {service.get('name', 'unknown')} | "
-                    f"Product: {service.get('product', '')} | "
-                    f"Version: {service.get('version', '')}"
-                )
-
-    if not results:
-        return "No scan results were returned."
-
-    return "\n".join(results)
-
-
-# ==========================================
-# GEMINI AI SECURITY ANALYSIS
-# ==========================================
-
-def build_prompt(scan_results):
-    return f"""
-You are a network security analyst.
-
-Analyze the following Nmap scan results.
-
-Include:
-1. Executive summary.
-2. Open and filtered ports and their services.
-3. Potential security risks supported by the scan evidence.
-4. Recommended security improvements.
-5. A risk level: Low, Medium, or High, with justification.
-
-Important:
-- Do not claim a vulnerability exists without sufficient evidence.
-- An open port does not automatically mean a vulnerability.
-- Do not invent dates, CVE IDs, or software versions that are absent from the
-  scan data.
-- Explain uncertainty where scan data is incomplete.
-- Format the report with clear headings.
-
-Nmap scan results:
-{scan_results}
+For the desktop UI run:  python app.py
 """
 
+import sys
 
-def analyze_with_ai(scan_results):
-    print("\n[*] Sending scan results to Gemini for analysis...\n")
+import scanner
 
-    if not API_KEY:
-        return (
-            "Gemini analysis failed.\n"
-            "Error: GEMINI_API_KEY is not set.\n"
-            'Set it first, for example:  $env:GEMINI_API_KEY = "your-key"'
-        )
-
-    client = genai.Client(api_key=API_KEY)
-    prompt = build_prompt(scan_results)
-    last_error = "unknown error"
-
-    for round_number in range(RETRY_ROUNDS + 1):
-        if round_number > 0:
-            delay = RETRY_DELAY * round_number
-            print(f"[*] Retrying in {delay}s (pass {round_number + 1})...")
-            time.sleep(delay)
-
-        for model in MODEL_CANDIDATES:
-            try:
-                response = client.models.generate_content(
-                    model=model,
-                    contents=prompt
-                )
-
-                if response.text:
-                    print(f"[*] Analysis generated by: {model}")
-                    return response.text
-
-                last_error = f"{model} returned an empty response."
-
-            except errors.APIError as error:
-                last_error = f"{model}: {error.code} {error.status}"
-                print(f"[!] {last_error}")
-
-                # Only these are worth retrying on another model.
-                if error.code not in (429, 500, 503):
-                    break
-
-            except Exception as error:
-                last_error = f"{model}: {error}"
-                print(f"[!] {last_error}")
-
-    return (
-        "Gemini analysis failed.\n"
-        f"Error: {last_error}\n"
-        "Check your API key, model availability, and internet connection."
-    )
-
-
-# ==========================================
-# MAIN PROGRAM
-# ==========================================
 
 def main():
     print("=" * 55)
@@ -206,44 +18,57 @@ def main():
         "or have explicit permission to scan."
     )
 
-    # Optional command-line target:  python Ai_scan.py 192.168.1.10
     if len(sys.argv) > 1:
         target_input = sys.argv[1]
         print(f"\nTarget taken from command line: {target_input}")
     else:
-        target_input = input(
-            "\nEnter localhost or a private IP address: "
-        )
+        target_input = input("\nEnter localhost or a private IP address: ")
 
     try:
-        target = get_target(target_input)
+        target = scanner.get_target(target_input)
     except ValueError as error:
         print(f"\n[!] {error}")
         return
 
     try:
-        scan_results = run_nmap_scan(target)
+        print(f"\n[*] Starting Nmap scan for {target}...")
+        print("[*] Scanning the top 100 TCP ports. Please wait.\n")
+
+        scan = scanner.scan_ports(target)
 
         print("=" * 55)
         print("RAW NMAP SCAN RESULTS")
         print("=" * 55)
-        print(scan_results)
+        print(scanner.format_results(scan))
 
-        report = analyze_with_ai(scan_results)
+        if scan.get("incomplete"):
+            print(
+                "\n[!] The host never returned a usable answer, so this is an "
+                "incomplete scan — not a clean one.\n"
+                "    It may be rate-limiting or filtering probes. "
+                "Try again in a minute."
+            )
+            return
+
+        print("\n[*] Sending scan results to Gemini for analysis...\n")
+
+        result = scanner.analyze(
+            scan,
+            on_status=lambda message: print(f"[!] {message}"),
+        )
 
         print("\n" + "=" * 55)
-        print("GEMINI SECURITY ANALYSIS REPORT")
+        print("SECURITY BRIEF")
         print("=" * 55)
-        print(report)
+        print(f"RISK: {result['risk']}    (model: {result['model']})")
+        print()
+        print(result["body"])
 
         print("\n[*] Scan and analysis process completed.")
 
-    except nmap.PortScannerError as error:
-        print(f"\n[!] Nmap error: {error}")
-        print("Make sure Nmap is installed and available in PATH.")
-
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - simple CLI error surface
         print(f"\n[!] Unexpected error: {error}")
+        print("Make sure Nmap is installed and available in PATH.")
 
 
 if __name__ == "__main__":
